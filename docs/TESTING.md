@@ -1,6 +1,7 @@
-# Testing — what we ran (42 tests, all green)
+# Testing — what we ran (47 tests, all green)
 
-Run: `pytest -q` → `42 passed` (`test_jobs.py`: 6 core · `test_extended.py`: 33 gates · `test_retry.py`: 3).
+Run: `pytest -q` → `47 passed` (`test_jobs.py`: 6 core · `test_extended.py`: 33 gates ·
+`test_retry.py`: 3 · `test_queue.py`: 5).
 
 ## Core (test_jobs.py)
 - Create → `202` + `Location`, `total` correct.
@@ -25,6 +26,11 @@ Run: `pytest -q` → `42 passed` (`test_jobs.py`: 6 core · `test_extended.py`: 
   `OSError`/lock errors → transient (retry).
 - Transient recovers: flaky-once generator succeeds on attempt 2.
 - Permanent doesn't retry: always-bad generator called exactly once.
+
+## Queue (test_queue.py, 5)
+- Memory fallback with no `REDIS_URL`; memory fallback when Redis unreachable (never raises).
+- In-memory push/pop order; `desired_workers()` bounded `[1, cap]`.
+- End-to-end dispatch without Redis completes a job.
 
 ## Live break-probes (ad-hoc, all correct)
 Empty/oversize-5001 (`422/413`), missing job/cert (`404`), traversal path (`404`),

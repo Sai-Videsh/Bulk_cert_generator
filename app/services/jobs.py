@@ -6,8 +6,13 @@ rest (per assignment: failure isolation + status visibility).
 
 Retry policy: permanent errors fail fast (no retry); transient errors retry
 with backoff up to MAX_GENERATION_RETRIES, then fail.
+
+Dispatch: job ids go through a queue (Redis when REDIS_URL works, else
+in-memory). MAX_WORKERS is the ceiling; the pool spawns threads on demand so
+small jobs use ~1 thread and big backlogs scale up to the cap — never more.
 """
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -16,16 +21,81 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.config import get_settings
+from app.queue import desired_workers, get_queue
 from app.schemas import JobCreate
 from app.services.generator import generate_certificate_pdf
 from app.services.storage import LocalStorage
 
 log = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=get_settings().max_workers, thread_name_prefix="cert-worker")
+_QUEUE = None
+_DISPATCHER_STARTED = False
+_DISPATCHER_LOCK = threading.Lock()
 
 
 def _storage() -> LocalStorage:
     return LocalStorage(get_settings().storage_dir)
+
+
+def _queue():
+    global _QUEUE
+    if _QUEUE is None:
+        _QUEUE = get_queue()
+    return _QUEUE
+
+
+def _reset_queue() -> None:  # tests only
+    global _QUEUE, _DISPATCHER_STARTED
+    _QUEUE = None
+    _DISPATCHER_STARTED = False
+
+
+def _dispatcher_loop() -> None:
+    """Redis path: pop job ids and hand to the pool. Daemon thread."""
+    log.info("queue dispatcher started")
+    while True:
+        try:
+            job_id = _queue().pop_nowait()
+            if job_id is None:
+                time.sleep(0.2)
+                continue
+            cap = get_settings().max_workers
+            log.info("dispatch job %s (queue depth %d, workers up to %d)",
+                     job_id, len(_queue()), desired_workers(len(_queue()), cap))
+            _executor.submit(_process_job, job_id)
+        except Exception as exc:
+            log.warning("dispatcher error: %s", exc)
+            time.sleep(1.0)
+
+
+def _ensure_dispatcher() -> None:
+    global _DISPATCHER_STARTED
+    with _DISPATCHER_LOCK:
+        if _DISPATCHER_STARTED:
+            return
+        threading.Thread(target=_dispatcher_loop, daemon=True, name="queue-dispatcher").start()
+        _DISPATCHER_STARTED = True
+
+
+def start_dispatcher_if_needed() -> None:
+    """Called at app startup: only needed when the Redis backend is active."""
+    try:
+        if _queue().backend == "redis":
+            _ensure_dispatcher()
+    except Exception as exc:
+        log.warning("dispatcher not started: %s", exc)
+
+
+def _dispatch(job_id: str) -> None:
+    q = _queue()
+    q.push(job_id)
+    if q.backend == "redis":
+        _ensure_dispatcher()  # dispatcher hands it to the pool; still capped
+    else:
+        # In-process: ThreadPoolExecutor spawns threads on demand up to
+        # MAX_WORKERS, so small jobs use ~1 thread, backlogs scale to cap.
+        log.info("dispatch job %s (in-process, pool cap %d)", job_id, get_settings().max_workers)
+        _executor.submit(_process_job, job_id)
 
 
 def _is_permanent(exc: Exception) -> bool:
@@ -94,8 +164,8 @@ def create_job(db: Session, payload: JobCreate, idempotency_key: str | None = No
     db.commit()
     db.refresh(job)
 
-    # Fire-and-forget background processing (in-process pool; swap for Celery/Redis at scale).
-    _executor.submit(_process_job, job.id)
+    # Queued dispatch (Redis when available, else in-process pool).
+    _dispatch(job.id)
     return job
 
 
@@ -111,8 +181,10 @@ def _process_job(job_id: str) -> None:
         max_retries = get_settings().max_generation_retries
         pending = db.query(models.Certificate).filter_by(job_id=job_id, status="pending").all()
         for cert in pending:
+            # One commit per cert (was two): 'processing' mark is flushed, not
+            # committed — crash leaves 'pending', which is safely retried.
             cert.status = "processing"
-            db.commit()
+            db.flush()
             try:
                 file_path, attempts = _generate_with_retry(
                     storage, job_id, cert.id,

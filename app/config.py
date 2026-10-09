@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
     # Generation retries: transient errors retry, permanent fail fast.
     max_generation_retries: int = 2
+    # Queue: empty = in-process (zero infra). Set REDIS_URL=redis://host:6379/0 for shared queue.
+    redis_url: str = ""
 
 
 @lru_cache

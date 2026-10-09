@@ -60,6 +60,9 @@ class JobOut(BaseModel):
 class JobDetailOut(JobOut):
     certificates: list[CertificateOut] = []
     failures: list[CertificateOut] = []
+    certificates_total: int = 0
+    failures_total: int = 0
+    truncated: bool = False
 
 
 def to_job_out(job) -> JobOut:

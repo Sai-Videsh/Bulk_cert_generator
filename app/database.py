@@ -31,3 +31,13 @@ def init_db() -> None:
         with engine.connect() as conn:
             conn.execute(text("PRAGMA journal_mode=WAL;"))
             conn.execute(text("PRAGMA busy_timeout=30000;"))
+
+
+def requeue_stuck() -> int:
+    """Crash recovery: certs stuck in 'processing' (dead worker) go back to 'pending'."""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        r = conn.execute(text("UPDATE certificates SET status='pending' WHERE status='processing'"))
+        conn.commit()
+        return r.rowcount

@@ -20,6 +20,18 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    try:
+        from app.database import requeue_stuck
+
+        log.info("requeued %d stuck certificates", requeue_stuck())
+    except Exception as exc:
+        log.warning("requeue skipped: %s", exc)
+    try:
+        from app.services.jobs import start_dispatcher_if_needed
+
+        start_dispatcher_if_needed()  # no-op unless REDIS_URL works
+    except Exception as exc:
+        log.warning("dispatcher startup skipped: %s", exc)
     yield
 
 
@@ -65,13 +77,22 @@ def create_app() -> FastAPI:
 
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            return {"status": "ready"}
+            return {"status": "ready", "queue": _queue_backend()}
         except Exception as exc:
             response.status_code = 503
             return {"status": "not-ready", "error": str(exc)}
 
     app.include_router(v1_router, prefix=settings.api_prefix, dependencies=[Depends(require_api_key)])
     return app
+
+
+def _queue_backend() -> str:
+    try:
+        from app.services.jobs import _queue
+
+        return _queue().backend
+    except Exception:
+        return "unknown"
 
 
 app = create_app()

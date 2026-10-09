@@ -50,14 +50,28 @@ def list_jobs(
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailOut)
-def get_job(job_id: str, db: Session = Depends(get_db)):
+def get_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    cert_limit: int = Query(default=100, ge=0, le=500),
+    failures_limit: int = Query(default=100, ge=0, le=500),
+):
     job = db.query(models.Job).filter_by(id=job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     out = to_job_out(job)
-    certs = db.query(models.Certificate).filter_by(job_id=job_id).order_by(models.Certificate.created_at).all()
-    failures = [c for c in certs if c.status == "failed"]
-    return JobDetailOut(**out.model_dump(), certificates=certs, failures=failures)
+    # Bounded: never dump thousands of rows in one response. Full rows live on
+    # GET /jobs/{id}/certificates (paginated). Small jobs are unaffected.
+    base = db.query(models.Certificate).filter_by(job_id=job_id)
+    total = base.count()
+    failed_total = base.filter_by(status="failed").count()
+    certs = base.order_by(models.Certificate.created_at).limit(cert_limit).all()
+    failures = base.filter_by(status="failed").order_by(models.Certificate.created_at).limit(failures_limit).all() if failed_total else []
+    return JobDetailOut(
+        **out.model_dump(), certificates=certs, failures=failures,
+        certificates_total=total, failures_total=failed_total,
+        truncated=(total > len(certs) or failed_total > len(failures)),
+    )
 
 
 @router.get("/jobs/{job_id}/certificates", response_model=list[CertificateOut])

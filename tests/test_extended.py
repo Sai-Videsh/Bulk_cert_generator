@@ -15,7 +15,7 @@ def _fresh_limits():
     s = get_settings()
     old_rate, old_body = s.rate_limit_per_minute, s.max_body_bytes
     old_auth, old_keys = s.auth_enabled, s.api_keys
-    s.rate_limit_per_minute = 600
+    s.rate_limit_per_minute = 1500
     s.max_body_bytes = 5 * 1024 * 1024
     s.auth_enabled = False
     yield
@@ -85,7 +85,7 @@ def test_rate_limit_429_then_recover():
     codes = [client.get("/api/v1/jobs?limit=1").status_code for _ in range(5)]
     assert 429 in codes
     reset_rate_limiter()
-    get_settings().rate_limit_per_minute = 600
+    get_settings().rate_limit_per_minute = 1500
     assert client.get("/api/v1/jobs?limit=1").status_code == 200
 
 
