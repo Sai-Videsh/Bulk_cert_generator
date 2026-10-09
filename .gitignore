@@ -1,0 +1,30 @@
+# runtime outputs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+storage/
+outputs/
+certificates.zip
+certs.zip
+*.zip
+
+# secrets / local env
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# pytest / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+
+# streamlit / editors
+.streamlit/
+.vscode/
+.idea/
+.DS_Store

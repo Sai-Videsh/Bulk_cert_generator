@@ -1,0 +1,10 @@
+{
+  "title": "Python Workshop 2026",
+  "course_name": "Advanced Python",
+  "issuer": "Acme Academy",
+  "recipients": [
+    {"name": "Aarav Sharma", "email": "aarav@example.com"},
+    {"name": "Diya Patel", "email": "diya@example.com", "course_name": "Advanced Python - Batch B"},
+    {"name": "Kabir Singh FAIL", "email": "kabir@example.com"}
+  ]
+}
